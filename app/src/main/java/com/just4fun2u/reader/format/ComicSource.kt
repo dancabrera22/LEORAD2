@@ -1,8 +1,8 @@
-package com.leorad.reader.format
+package com.just4fun2u.reader.format
 
 import com.github.junrar.Archive
 import com.github.junrar.rarfile.FileHeader
-import com.leorad.reader.data.BookType
+import com.just4fun2u.reader.data.BookType
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.File

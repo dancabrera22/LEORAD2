@@ -3,7 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent">
 
-    <com.leorad.reader.ui.ZoomableImageView
+    <com.just4fun2u.reader.ui.ZoomableImageView
         android:id="@+id/pageImage"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />

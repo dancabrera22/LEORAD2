@@ -7,7 +7,7 @@
         android:label="@string/app_name"
         android:largeHeap="true"
         android:supportsRtl="true"
-        android:theme="@style/Theme.LeoRad">
+        android:theme="@style/Theme.Just4Fun2U">
 
         <activity
             android:name=".MainActivity"
@@ -21,7 +21,7 @@
         <activity
             android:name=".ComicReaderActivity"
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"
-            android:theme="@style/Theme.LeoRad.Reader" />
+            android:theme="@style/Theme.Just4Fun2U.Reader" />
 
         <activity
             android:name=".BookReaderActivity"

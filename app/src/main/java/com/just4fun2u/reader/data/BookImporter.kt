@@ -1,13 +1,13 @@
-package com.leorad.reader.data
+package com.just4fun2u.reader.data
 
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.OpenableColumns
-import com.leorad.reader.format.ComicSource
-import com.leorad.reader.format.EpubBook
-import com.leorad.reader.format.MobiBook
+import com.just4fun2u.reader.format.ComicSource
+import com.just4fun2u.reader.format.EpubBook
+import com.just4fun2u.reader.format.MobiBook
 import java.io.File
 import java.io.FileOutputStream
 

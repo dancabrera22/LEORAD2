@@ -1,4 +1,4 @@
-package com.leorad.reader.format
+package com.just4fun2u.reader.format
 
 import android.util.Base64
 import java.io.File

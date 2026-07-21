@@ -1,4 +1,4 @@
-package com.leorad.reader.ui
+package com.just4fun2u.reader.ui
 
 import android.annotation.SuppressLint
 import android.content.Context

@@ -1,4 +1,4 @@
-package com.leorad.reader
+package com.just4fun2u.reader
 
 import android.graphics.BitmapFactory
 import android.os.Bundle
@@ -15,10 +15,10 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
-import com.leorad.reader.data.Book
-import com.leorad.reader.data.LibraryStore
-import com.leorad.reader.format.ComicSource
-import com.leorad.reader.ui.ZoomableImageView
+import com.just4fun2u.reader.data.Book
+import com.just4fun2u.reader.data.LibraryStore
+import com.just4fun2u.reader.format.ComicSource
+import com.just4fun2u.reader.ui.ZoomableImageView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

@@ -1,4 +1,4 @@
-package com.leorad.reader.data
+package com.just4fun2u.reader.data
 
 enum class BookType {
     CBZ, CBR, EPUB, MOBI;

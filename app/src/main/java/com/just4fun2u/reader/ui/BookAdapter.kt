@@ -1,4 +1,4 @@
-package com.leorad.reader.ui
+package com.just4fun2u.reader.ui
 
 import android.graphics.BitmapFactory
 import android.view.LayoutInflater
@@ -8,9 +8,9 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
-import com.leorad.reader.R
-import com.leorad.reader.data.Book
-import com.leorad.reader.data.LibraryStore
+import com.just4fun2u.reader.R
+import com.just4fun2u.reader.data.Book
+import com.just4fun2u.reader.data.LibraryStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job

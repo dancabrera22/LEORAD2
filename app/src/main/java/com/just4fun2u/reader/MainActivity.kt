@@ -1,4 +1,4 @@
-package com.leorad.reader
+package com.just4fun2u.reader
 
 import android.content.Intent
 import android.os.Bundle
@@ -15,11 +15,11 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
 import com.google.android.material.textfield.TextInputEditText
 import com.google.android.material.textfield.TextInputLayout
-import com.leorad.reader.data.Book
-import com.leorad.reader.data.BookCollection
-import com.leorad.reader.data.BookImporter
-import com.leorad.reader.data.LibraryStore
-import com.leorad.reader.ui.BookAdapter
+import com.just4fun2u.reader.data.Book
+import com.just4fun2u.reader.data.BookCollection
+import com.just4fun2u.reader.data.BookImporter
+import com.just4fun2u.reader.data.LibraryStore
+import com.just4fun2u.reader.ui.BookAdapter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch

@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.leorad.reader"
+    namespace = "com.just4fun2u.reader"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.leorad.reader"
+        applicationId = "com.just4fun2u.reader"
         minSdk = 26
         targetSdk = 34
         versionCode = 1
@@ -17,10 +17,10 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = rootProject.file("signing/leorad.jks")
-            storePassword = "leorad123"
-            keyAlias = "leorad"
-            keyPassword = "leorad123"
+            storeFile = rootProject.file("signing/just4fun2u.jks")
+            storePassword = "just4fun2u123"
+            keyAlias = "just4fun2u"
+            keyPassword = "just4fun2u123"
         }
     }
 

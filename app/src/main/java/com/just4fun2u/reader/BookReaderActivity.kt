@@ -1,4 +1,4 @@
-package com.leorad.reader
+package com.just4fun2u.reader
 
 import android.annotation.SuppressLint
 import android.os.Bundle
@@ -12,12 +12,12 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
-import com.leorad.reader.data.Book
-import com.leorad.reader.data.BookType
-import com.leorad.reader.data.LibraryStore
-import com.leorad.reader.format.EpubBook
-import com.leorad.reader.format.MobiBook
-import com.leorad.reader.format.UnsupportedFormatException
+import com.just4fun2u.reader.data.Book
+import com.just4fun2u.reader.data.BookType
+import com.just4fun2u.reader.data.LibraryStore
+import com.just4fun2u.reader.format.EpubBook
+import com.just4fun2u.reader.format.MobiBook
+import com.just4fun2u.reader.format.UnsupportedFormatException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,7 +37,7 @@ class BookReaderActivity : AppCompatActivity() {
     private val scope = CoroutineScope(Dispatchers.Main)
 
     companion object {
-        private const val EPUB_HOST = "leorad.epub"
+        private const val EPUB_HOST = "just4fun2u.epub"
         private const val INJECT_CSS =
             "body{padding:16px 20px;line-height:1.6;max-width:46em;margin:0 auto;" +
                 "word-wrap:break-word;} img{max-width:100%;height:auto;}"
@@ -200,9 +200,9 @@ class BookReaderActivity : AppCompatActivity() {
     private fun injectStyleAndRestore() {
         val js = """
             (function(){
-              if(!document.getElementById('leorad-style')){
+              if(!document.getElementById('just4fun2u-style')){
                 var s=document.createElement('style');
-                s.id='leorad-style';
+                s.id='just4fun2u-style';
                 s.textContent='${INJECT_CSS.replace("'", "\\'")}';
                 document.head.appendChild(s);
               }

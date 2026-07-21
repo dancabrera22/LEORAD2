@@ -24,5 +24,5 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: leorad-apk
+          name: just4fun2u-apk
           path: app/build/outputs/apk/release/app-release.apk

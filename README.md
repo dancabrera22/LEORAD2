@@ -1,4 +1,4 @@
-# LeoRad
+# Just4Fun2U
 
 Leitor de quadrinhos e livros para Android — simples, leve e offline.
 
@@ -22,7 +22,7 @@ Leitor de quadrinhos e livros para Android — simples, leve e offline.
 
 ## Como obter o APK
 
-1. **GitHub Actions**: cada push gera o APK — veja a aba *Actions* → workflow *Build APK* → artefato `leorad-apk`.
+1. **GitHub Actions**: cada push gera o APK — veja a aba *Actions* → workflow *Build APK* → artefato `just4fun2u-apk`.
 2. **Compilando localmente**:
    ```bash
    ./gradlew assembleRelease

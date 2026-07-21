@@ -1,4 +1,4 @@
-package com.leorad.reader.format
+package com.just4fun2u.reader.format
 
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
