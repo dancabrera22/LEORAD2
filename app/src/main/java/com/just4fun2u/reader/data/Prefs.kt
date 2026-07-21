@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 
 enum class LibraryView { GRID, LIST, CIRCLE }
 enum class ComicMode { FLIP, SLIDE, SCROLL }
+enum class BookMode { PAGED, SCROLL }
 enum class ReadFilter { NONE, PAPER, VINTAGE, SEPIA, MONO, DALTONIC }
 
 /** Preferências do usuário (modo de leitura, filtros, visualização da biblioteca). */
@@ -32,6 +33,10 @@ object Prefs {
     var bookFilter: ReadFilter
         get() = enum(sp.getString("bookFilter", null), ReadFilter.NONE)
         set(v) = sp.edit().putString("bookFilter", v.name).apply()
+
+    var bookMode: BookMode
+        get() = enum(sp.getString("bookMode", null), BookMode.PAGED)
+        set(v) = sp.edit().putString("bookMode", v.name).apply()
 
     private inline fun <reified T : Enum<T>> enum(name: String?, fallback: T): T =
         try {

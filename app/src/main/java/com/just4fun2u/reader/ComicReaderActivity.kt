@@ -27,7 +27,7 @@ import com.just4fun2u.reader.data.Prefs
 import com.just4fun2u.reader.data.ReadFilter
 import com.just4fun2u.reader.format.ComicSource
 import com.just4fun2u.reader.ui.Filters
-import com.just4fun2u.reader.ui.FlipPageTransformer
+import com.just4fun2u.reader.ui.SoftPageView
 import com.just4fun2u.reader.ui.ZoomableImageView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +40,7 @@ class ComicReaderActivity : AppCompatActivity() {
     private var book: Book? = null
     private var source: ComicSource? = null
     private lateinit var pager: ViewPager2
+    private lateinit var softPager: SoftPageView
     private lateinit var scrollRecycler: RecyclerView
     private lateinit var overlay: View
     private lateinit var pageLabel: TextView
@@ -60,6 +61,7 @@ class ComicReaderActivity : AppCompatActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
 
         pager = findViewById(R.id.pager)
+        softPager = findViewById(R.id.softPager)
         scrollRecycler = findViewById(R.id.scrollRecycler)
         overlay = findViewById(R.id.overlay)
         pageLabel = findViewById(R.id.pageLabel)
@@ -116,9 +118,28 @@ class ComicReaderActivity : AppCompatActivity() {
         pager.offscreenPageLimit = 1
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
-                if (mode != ComicMode.SCROLL) onPageShown(position)
+                if (mode == ComicMode.SLIDE) onPageShown(position)
             }
         })
+
+        softPager.onPageChanged = { if (mode == ComicMode.FLIP) onPageShown(it) }
+        softPager.onSingleTap = { toggleOverlay() }
+        softPager.pageColorFilter = Filters.colorFilter(filter)
+        softPager.setSource(object : SoftPageView.PageSource {
+            override val count get() = src.pageCount
+            override fun requestPage(index: Int, cb: (android.graphics.Bitmap?) -> Unit) {
+                scope.launch {
+                    val bmp = withContext(Dispatchers.IO) {
+                        try {
+                            decodeSampled(src.pageBytes(index))
+                        } catch (_: Exception) {
+                            null
+                        }
+                    }
+                    cb(bmp)
+                }
+            }
+        }, currentPage)
 
         scrollRecycler.layoutManager = LinearLayoutManager(this)
         scrollRecycler.adapter = ScrollAdapter(src)
@@ -153,28 +174,28 @@ class ComicReaderActivity : AppCompatActivity() {
 
     private fun jumpTo(position: Int) {
         currentPage = position
-        if (mode == ComicMode.SCROLL) {
-            (scrollRecycler.layoutManager as LinearLayoutManager)
-                .scrollToPositionWithOffset(position, 0)
-            onPageShown(position)
-        } else {
-            pager.setCurrentItem(position, false)
+        when (mode) {
+            ComicMode.SCROLL -> {
+                (scrollRecycler.layoutManager as LinearLayoutManager)
+                    .scrollToPositionWithOffset(position, 0)
+                onPageShown(position)
+            }
+            ComicMode.FLIP -> softPager.jumpTo(position)
+            ComicMode.SLIDE -> pager.setCurrentItem(position, false)
         }
     }
 
     private fun applyMode(jumpToCurrent: Boolean) {
-        val scroll = mode == ComicMode.SCROLL
-        pager.visibility = if (scroll) View.GONE else View.VISIBLE
-        scrollRecycler.visibility = if (scroll) View.VISIBLE else View.GONE
-        if (!scroll) {
-            pager.setPageTransformer(if (mode == ComicMode.FLIP) FlipPageTransformer() else null)
-        }
+        pager.visibility = if (mode == ComicMode.SLIDE) View.VISIBLE else View.GONE
+        softPager.visibility = if (mode == ComicMode.FLIP) View.VISIBLE else View.GONE
+        scrollRecycler.visibility = if (mode == ComicMode.SCROLL) View.VISIBLE else View.GONE
         if (jumpToCurrent) jumpTo(currentPage)
         onPageShown(currentPage)
     }
 
     private fun applyFilterToVisible() {
         val cf = Filters.colorFilter(filter)
+        softPager.pageColorFilter = cf
         val groups = mutableListOf<ViewGroup>(scrollRecycler)
         (pager.getChildAt(0) as? ViewGroup)?.let { groups.add(it) }
         groups.forEach { group ->

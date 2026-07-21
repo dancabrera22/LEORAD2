@@ -24,6 +24,7 @@
     <string name="mode_flip">Revista</string>
     <string name="mode_slide">Deslizar</string>
     <string name="mode_scroll">Rolagem vertical</string>
+    <string name="mode_paged">Páginas</string>
     <string name="filter_title">Filtro</string>
     <string name="filter_none">Normal</string>
     <string name="filter_paper">Papel</string>

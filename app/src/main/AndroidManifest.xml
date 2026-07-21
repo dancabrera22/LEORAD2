@@ -23,8 +23,6 @@
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"
             android:theme="@style/Theme.Just4Fun2U.Reader" />
 
-        <activity
-            android:name=".BookReaderActivity"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout" />
+        <activity android:name=".BookReaderActivity" />
     </application>
 </manifest>

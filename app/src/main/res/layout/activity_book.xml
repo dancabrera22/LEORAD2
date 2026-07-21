@@ -22,6 +22,12 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
 
+        <com.just4fun2u.reader.ui.SoftPageView
+            android:id="@+id/softPager"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:visibility="gone" />
+
         <ProgressBar
             android:id="@+id/loading"
             android:layout_width="wrap_content"

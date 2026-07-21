@@ -1,6 +1,8 @@
 package com.just4fun2u.reader
 
 import android.annotation.SuppressLint
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.os.Bundle
 import android.view.Menu
 import android.view.MenuItem
@@ -18,6 +20,7 @@ import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.just4fun2u.reader.data.Book
+import com.just4fun2u.reader.data.BookMode
 import com.just4fun2u.reader.data.BookType
 import com.just4fun2u.reader.data.LibraryStore
 import com.just4fun2u.reader.data.Prefs
@@ -26,6 +29,8 @@ import com.just4fun2u.reader.format.EpubBook
 import com.just4fun2u.reader.format.MobiBook
 import com.just4fun2u.reader.format.UnsupportedFormatException
 import com.just4fun2u.reader.ui.Filters
+import com.just4fun2u.reader.ui.SoftPageView
+import java.util.ArrayDeque
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -38,18 +43,45 @@ class BookReaderActivity : AppCompatActivity() {
     private var book: Book? = null
     private var epub: EpubBook? = null
     private lateinit var webView: WebView
+    private lateinit var softPager: SoftPageView
     private lateinit var chapterLabel: TextView
     private lateinit var bottomBar: View
     private var currentChapter = 0
     private var pendingScroll = 0
     private var filter: ReadFilter = ReadFilter.NONE
+    private var bookMode: BookMode = BookMode.PAGED
     private val scope = CoroutineScope(Dispatchers.Main)
+
+    // paginação (modo páginas)
+    private var pageCount = 1
+    /** página-alvo após carregar um capítulo: null = restaurar salva, -1 = última */
+    private var pendingTargetPage: Int? = null
+    private var firstLoad = true
+    private val snapQueue = ArrayDeque<Pair<Int, (Bitmap?) -> Unit>>()
+    private var snapping = false
 
     companion object {
         private const val EPUB_HOST = "just4fun2u.epub"
         private const val INJECT_CSS =
             "body{padding:16px 20px;line-height:1.6;max-width:46em;margin:0 auto;" +
                 "word-wrap:break-word;} img{max-width:100%;height:auto;}"
+        private const val PAGINATE_JS = """
+            (function(){
+              var s=document.getElementById('j4f-page-style');
+              if(!s){
+                s=document.createElement('style');
+                s.id='j4f-page-style';
+                document.head.appendChild(s);
+              }
+              s.textContent='html{height:100%;overflow:hidden;}'+
+                'body{margin:0 !important;padding:22px 22px !important;'+
+                'box-sizing:border-box !important;height:100% !important;'+
+                'max-width:none !important;column-width:calc(100vw - 44px);'+
+                'column-gap:44px;column-fill:auto;}'+
+                'img{max-width:100% !important;max-height:85vh !important;}';
+              return Math.max(1, Math.ceil((document.body.scrollWidth - 20) / window.innerWidth));
+            })();
+        """
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -66,6 +98,7 @@ class BookReaderActivity : AppCompatActivity() {
         toolbar.setNavigationOnClickListener { finish() }
 
         webView = findViewById(R.id.webView)
+        softPager = findViewById(R.id.softPager)
         chapterLabel = findViewById(R.id.chapterLabel)
         bottomBar = findViewById(R.id.bottomBar)
         val loading = findViewById<ProgressBar>(R.id.loading)
@@ -73,6 +106,26 @@ class BookReaderActivity : AppCompatActivity() {
         webView.settings.javaScriptEnabled = true
         webView.settings.builtInZoomControls = true
         webView.settings.displayZoomControls = false
+
+        bookMode = Prefs.bookMode
+        softPager.zoomEnabled = false
+        softPager.onPageChanged = { idx ->
+            book?.lastPage = idx
+            updateChapterLabel()
+        }
+        softPager.onOverscrollForward = {
+            val e = epub
+            if (e != null && currentChapter < e.spine.size - 1) {
+                pendingTargetPage = 0
+                openChapter(currentChapter + 1)
+            }
+        }
+        softPager.onOverscrollBackward = {
+            if (epub != null && currentChapter > 0) {
+                pendingTargetPage = -1
+                openChapter(currentChapter - 1)
+            }
+        }
 
         val b = intent.getStringExtra("bookId")?.let { LibraryStore.findBook(it) }
         if (b == null) {
@@ -144,11 +197,18 @@ class BookReaderActivity : AppCompatActivity() {
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     injectStyleAndRestore()
+                    if (bookMode == BookMode.PAGED) setupPagination()
                 }
             }
 
-            findViewById<View>(R.id.btnPrev).setOnClickListener { openChapter(currentChapter - 1) }
-            findViewById<View>(R.id.btnNext).setOnClickListener { openChapter(currentChapter + 1) }
+            findViewById<View>(R.id.btnPrev).setOnClickListener {
+                pendingTargetPage = 0
+                openChapter(currentChapter - 1)
+            }
+            findViewById<View>(R.id.btnNext).setOnClickListener {
+                pendingTargetPage = 0
+                openChapter(currentChapter + 1)
+            }
 
             openChapter(currentChapter.coerceIn(0, opened.spine.size - 1), restoreScroll = true)
         }
@@ -165,7 +225,85 @@ class BookReaderActivity : AppCompatActivity() {
 
     private fun updateChapterLabel() {
         val e = epub ?: return
-        chapterLabel.text = getString(R.string.chapter_progress, currentChapter + 1, e.spine.size)
+        val base = getString(R.string.chapter_progress, currentChapter + 1, e.spine.size)
+        chapterLabel.text = if (bookMode == BookMode.PAGED && pageCount > 1) {
+            "$base  ·  ${softPager.currentIndex + 1}/$pageCount"
+        } else base
+    }
+
+    // ---------- modo paginado ----------
+
+    private fun setupPagination() {
+        // esconde o WebView atrás do paginador enquanto medimos
+        webView.postDelayed({
+            webView.evaluateJavascript(PAGINATE_JS) { result ->
+                pageCount = result?.trim('"')?.toIntOrNull()?.coerceAtLeast(1) ?: 1
+                val saved = book?.lastPage ?: 0
+                val start = when (val target = pendingTargetPage) {
+                    null -> if (firstLoad) saved.coerceIn(0, pageCount - 1) else 0
+                    -1 -> pageCount - 1
+                    else -> target.coerceIn(0, pageCount - 1)
+                }
+                pendingTargetPage = null
+                firstLoad = false
+                softPager.visibility = View.VISIBLE
+                softPager.setSource(object : SoftPageView.PageSource {
+                    override val count get() = pageCount
+                    override fun requestPage(index: Int, cb: (Bitmap?) -> Unit) {
+                        enqueueSnapshot(index, cb)
+                    }
+                }, start)
+                updateChapterLabel()
+            }
+        }, 120)
+    }
+
+    private fun enqueueSnapshot(index: Int, cb: (Bitmap?) -> Unit) {
+        snapQueue.add(index to cb)
+        pumpSnapshots()
+    }
+
+    private fun pumpSnapshots() {
+        if (snapping) return
+        val (index, cb) = snapQueue.poll() ?: return
+        snapping = true
+        webView.evaluateJavascript(
+            "window.scrollTo($index*window.innerWidth,0);"
+        ) {
+            webView.postDelayed({
+                val bmp = try {
+                    snapshotWebView()
+                } catch (_: Exception) {
+                    null
+                }
+                snapping = false
+                cb(bmp)
+                pumpSnapshots()
+            }, 90)
+        }
+    }
+
+    private fun snapshotWebView(): Bitmap? {
+        val w = webView.width
+        val h = webView.height
+        if (w <= 0 || h <= 0) return null
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        canvas.translate(-webView.scrollX.toFloat(), -webView.scrollY.toFloat())
+        webView.draw(canvas)
+        return bmp
+    }
+
+    /** Recaptura as páginas visíveis (após trocar filtro no modo paginado). */
+    private fun refreshPagedSnapshots() {
+        if (bookMode != BookMode.PAGED || softPager.visibility != View.VISIBLE) return
+        snapQueue.clear()
+        softPager.setSource(object : SoftPageView.PageSource {
+            override val count get() = pageCount
+            override fun requestPage(index: Int, cb: (Bitmap?) -> Unit) {
+                enqueueSnapshot(index, cb)
+            }
+        }, softPager.currentIndex)
     }
 
     // ---------- MOBI ----------
@@ -197,6 +335,7 @@ class BookReaderActivity : AppCompatActivity() {
 
                 override fun onPageFinished(view: WebView?, url: String?) {
                     injectStyleAndRestore()
+                    if (bookMode == BookMode.PAGED) setupPagination()
                 }
             }
             val page = "<html><head><meta charset=\"utf-8\">" +
@@ -226,7 +365,29 @@ class BookReaderActivity : AppCompatActivity() {
         val sheet = BottomSheetDialog(this)
         val view = layoutInflater.inflate(R.layout.sheet_reader_settings, null)
         sheet.setContentView(view)
-        view.findViewById<View>(R.id.modeSection).visibility = View.GONE
+
+        val modeGroup = view.findViewById<ChipGroup>(R.id.modeGroup)
+        val modes = listOf(
+            BookMode.PAGED to getString(R.string.mode_paged),
+            BookMode.SCROLL to getString(R.string.mode_scroll)
+        )
+        modes.forEach { (m, label) ->
+            val chip = Chip(this).apply {
+                text = label
+                isCheckable = true
+                isChecked = m == bookMode
+                isCheckedIconVisible = false
+                setOnClickListener {
+                    isChecked = true
+                    if (m != bookMode) {
+                        Prefs.bookMode = m
+                        sheet.dismiss()
+                        recreate()
+                    }
+                }
+            }
+            modeGroup.addView(chip)
+        }
 
         val filterGroup = view.findViewById<ChipGroup>(R.id.filterGroup)
         ReadFilter.entries.forEach { f ->
@@ -240,6 +401,7 @@ class BookReaderActivity : AppCompatActivity() {
                     filter = f
                     Prefs.bookFilter = f
                     injectStyleAndRestore()
+                    webView.postDelayed({ refreshPagedSnapshots() }, 200)
                 }
             }
             filterGroup.addView(chip)
@@ -270,7 +432,7 @@ class BookReaderActivity : AppCompatActivity() {
             })();
         """.trimIndent()
         webView.evaluateJavascript(js) {
-            if (pendingScroll > 0) {
+            if (bookMode == BookMode.SCROLL && pendingScroll > 0) {
                 webView.postDelayed({ webView.scrollTo(0, pendingScroll) }, 120)
                 pendingScroll = 0
             }
@@ -281,7 +443,7 @@ class BookReaderActivity : AppCompatActivity() {
         super.onPause()
         book?.let {
             it.lastChapter = currentChapter
-            it.lastScroll = webView.scrollY
+            if (bookMode == BookMode.SCROLL) it.lastScroll = webView.scrollY
             LibraryStore.save()
         }
     }
