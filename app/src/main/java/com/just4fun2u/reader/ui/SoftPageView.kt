@@ -10,6 +10,7 @@ import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.LinearGradient
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.RectF
 import android.graphics.Shader
 import android.util.AttributeSet
@@ -20,19 +21,25 @@ import android.view.View
 import android.view.animation.DecelerateInterpolator
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
 /**
- * Paginador com efeito de página "mole": ao virar, a folha se deforma
- * como papel flexível (malha deformada com drawBitmapMesh), acompanha o
- * dedo e projeta sombra sobre a página de baixo — como no Apple Livros.
+ * Paginador com dobra de papel realista: o ponto onde o dedo segura a
+ * folha (canto de cima, canto de baixo ou meio da borda) fica ancorado ao
+ * dedo, e a página enrola em volta de um cilindro virtual cuja linha de
+ * dobra é calculada a partir da posição do dedo — arraste em qualquer
+ * direção e a dobra acompanha, como a ponta de uma página de livro de
+ * verdade. O verso da folha aparece como papel creme fosco e opaco. A
+ * virada solta tem peso e inércia: começa com a velocidade do gesto e
+ * assenta devagar.
  *
- * Trabalha com bitmaps fornecidos de forma assíncrona por um [PageSource],
- * o que permite usá-lo tanto para páginas de quadrinhos quanto para
- * capturas de página de um WebView.
+ * Trabalha com bitmaps assíncronos de um [PageSource] (páginas de
+ * quadrinhos ou capturas de WebView).
  */
 class SoftPageView @JvmOverloads constructor(
     context: Context,
@@ -71,27 +78,22 @@ class SoftPageView @JvmOverloads constructor(
     private enum class State { IDLE, TURNING }
     private var state = State.IDLE
     private var turningBack = false
-    /** progresso visual da folha da frente: 0 = plana cobrindo, 1 = totalmente virada. */
-    private var t = 0f
     private var animator: ValueAnimator? = null
 
+    // ponto virtual do dedo (Fv) e ponto da folha que ele segura (P0)
+    private var fx = 0f
+    private var fy = 0f
+    private var grabX = 0f
+    private var grabY = 0f
+    // âncora do dedo virtual no início do arrasto
+    private var anchorX = 0f
+    private var anchorY = 0f
+
     private var downX = 0f
+    private var downY = 0f
     private var dragging = false
     private var attemptedOverscroll = 0
-
-    // dobra diagonal que acompanha a altura do dedo
-    private var tiltPhi = 0f       // inclinação da linha da dobra (rad)
-    private var foldPivotY = 0f    // altura em que o dedo "segura" a folha
-
-    // velocidade do arrasto (suavizada): puxão rápido aperta o rolo
     private var dragSpeed = 0f
-
-    companion object {
-        /** inclinação máxima da dobra (~30°) quando o dedo está num canto */
-        private const val MAX_TILT = 0.52f
-        /** quanto a dobra "gruda" no dedo (0..1, maior = resposta mais direta) */
-        private const val FOLLOW = 0.45f
-    }
 
     // zoom
     private var scale = 1f
@@ -101,13 +103,22 @@ class SoftPageView @JvmOverloads constructor(
     private val pagePaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val scrimPaint = Paint()
     private val shadowPaint = Paint()
+    private val creamPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bgPaint = Paint().apply { color = Color.BLACK }
+    private val creamPath = Path()
 
     private val meshCols = 32
     private val meshRows = 16
     private val verts = FloatArray((meshCols + 1) * (meshRows + 1) * 2)
     private val colors = IntArray((meshCols + 1) * (meshRows + 1))
     private val fitRect = RectF()
+
+    companion object {
+        /** quanto a folha "gruda" no dedo por quadro (perto de literal) */
+        private const val FOLLOW = 0.8f
+        private const val CREAM_LIGHT = 0xFFF7F3E6.toInt()
+        private const val CREAM_DARK = 0xFFE6DFCB.toInt()
+    }
 
     // ---------- API ----------
 
@@ -119,7 +130,6 @@ class SoftPageView @JvmOverloads constructor(
         pending.clear()
         currentIndex = startIndex.coerceIn(0, max(0, src.count - 1))
         state = State.IDLE
-        t = 0f
         resetZoom()
         ensurePages()
         invalidate()
@@ -132,7 +142,6 @@ class SoftPageView @JvmOverloads constructor(
         if (target == currentIndex) return
         animator?.cancel()
         state = State.IDLE
-        t = 0f
         currentIndex = target
         resetZoom()
         ensurePages()
@@ -189,12 +198,9 @@ class SoftPageView @JvmOverloads constructor(
         object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean {
                 downX = e.x
+                downY = e.y
                 dragging = false
                 attemptedOverscroll = 0
-                if (state == State.IDLE) {
-                    foldPivotY = e.y
-                    tiltPhi = tiltFor(e.y)
-                }
                 return true
             }
 
@@ -209,33 +215,24 @@ class SoftPageView @JvmOverloads constructor(
                     return true
                 }
                 if (animator?.isRunning == true) return true
-                val total = downX - e2.x
                 val src = source ?: return true
-                if (!dragging && abs(total) > 12f) {
-                    val forward = total > 0
+                val totalX = downX - e2.x
+                if (!dragging && abs(totalX) > 12f) {
+                    val forward = totalX > 0
                     if (forward && currentIndex + 1 >= src.count) {
                         attemptedOverscroll = 1
                     } else if (!forward && currentIndex <= 0) {
                         attemptedOverscroll = -1
                     } else {
-                        dragging = true
-                        state = State.TURNING
-                        turningBack = !forward
-                        ensurePages()
+                        beginDrag(forward)
                     }
                 }
                 if (dragging) {
-                    val w = width * 0.85f
-                    t = if (!turningBack) {
-                        (total / w).coerceIn(0f, 1f)
-                    } else {
-                        (1f - (-total / w)).coerceIn(0f, 1f)
-                    }
-                    // o dedo subindo/descendo reorienta a dobra em tempo real:
-                    // a ponta mais próxima do dedo dobra mais
-                    val targetTilt = tiltFor(e2.y)
-                    tiltPhi += (targetTilt - tiltPhi) * FOLLOW
-                    foldPivotY += (e2.y - foldPivotY) * FOLLOW
+                    // o ponto seguro pela mão segue o dedo (quase) literalmente
+                    val targetX = anchorX + (e2.x - downX)
+                    val targetY = anchorY + (e2.y - downY)
+                    fx += (targetX - fx) * FOLLOW
+                    fy += (targetY - fy) * FOLLOW
                     dragSpeed += (abs(dx) - dragSpeed) * 0.3f
                     invalidate()
                 }
@@ -262,13 +259,44 @@ class SoftPageView @JvmOverloads constructor(
                     return true
                 }
                 when {
-                    e.x > width * 0.72f -> startAnimatedTurn(forward = true, grabY = e.y)
-                    e.x < width * 0.28f -> startAnimatedTurn(forward = false, grabY = e.y)
+                    e.x > width * 0.72f -> startAnimatedTurn(forward = true, tapY = e.y)
+                    e.x < width * 0.28f -> startAnimatedTurn(forward = false, tapY = e.y)
                     else -> onSingleTap?.invoke()
                 }
                 return true
             }
         })
+
+    /** Escolhe o ponto da folha que a mão segura, conforme a altura do toque. */
+    private fun pickGrabPoint(touchY: Float) {
+        val bmp = cache[if (!turningBack) currentIndex else currentIndex - 1]
+        if (bmp != null) computeFit(bmp) else fitRect.set(0f, 0f, width.toFloat(), height.toFloat())
+        grabX = fitRect.right
+        grabY = when {
+            touchY < height / 3f -> fitRect.top + 2f          // ponta de cima
+            touchY > height * 2f / 3f -> fitRect.bottom - 2f  // ponta de baixo
+            else -> touchY.coerceIn(fitRect.top, fitRect.bottom) // meio da borda
+        }
+    }
+
+    private fun beginDrag(forward: Boolean) {
+        dragging = true
+        state = State.TURNING
+        turningBack = !forward
+        pickGrabPoint(downY)
+        if (forward) {
+            // folha plana: o dedo começa segurando o ponto da folha
+            anchorX = grabX
+            anchorY = grabY
+        } else {
+            // folha anterior já virada: começa dobrada, fora da tela à esquerda
+            anchorX = grabX - width * 1.45f
+            anchorY = grabY
+        }
+        fx = anchorX
+        fy = anchorY
+        ensurePages()
+    }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (event.pointerCount > 1) {
@@ -287,27 +315,23 @@ class SoftPageView @JvmOverloads constructor(
     private fun onGestureEnd() {
         if (dragging && state == State.TURNING) {
             dragging = false
-            val complete = if (!turningBack) t > 0.28f else t < 0.72f
-            animateTo(complete)
-        } else if (attemptedOverscroll != 0 && abs(downX) >= 0f) {
+            val dist = hypot(fx - grabX, fy - grabY)
+            val complete = if (!turningBack) {
+                dist > width * 0.38f
+            } else {
+                dist < width * 0.55f
+            }
+            animateRelease(complete)
+        } else if (attemptedOverscroll != 0) {
             if (attemptedOverscroll > 0) onOverscrollForward?.invoke()
             else onOverscrollBackward?.invoke()
             attemptedOverscroll = 0
         }
     }
 
-    /** Inclinação da dobra em função da altura onde o dedo segura a folha. */
-    private fun tiltFor(y: Float): Float {
-        if (height == 0) return 0f
-        val fy = (y / height).coerceIn(0f, 1f)
-        return -MAX_TILT * (0.5f - fy) * 2f
-    }
-
-    private fun startAnimatedTurn(forward: Boolean, grabY: Float? = null) {
+    private fun startAnimatedTurn(forward: Boolean, tapY: Float? = null) {
         val src = source ?: return
         if (state != State.IDLE || animator?.isRunning == true) return
-        foldPivotY = grabY ?: (height / 2f)
-        tiltPhi = grabY?.let { tiltFor(it) } ?: 0f
         if (forward && currentIndex + 1 >= src.count) {
             onOverscrollForward?.invoke()
             return
@@ -318,37 +342,74 @@ class SoftPageView @JvmOverloads constructor(
         }
         state = State.TURNING
         turningBack = !forward
-        t = if (!turningBack) 0f else 1f
+        pickGrabPoint(tapY ?: (height / 2f))
+        if (forward) {
+            fx = grabX - 4f
+            fy = grabY
+        } else {
+            fx = grabX - width * 1.45f
+            fy = grabY
+        }
         ensurePages()
-        animateTo(complete = true)
+        animateRelease(complete = true)
     }
 
-    private fun animateTo(complete: Boolean) {
-        val target = if (!turningBack) {
-            if (complete) 1f else 0f
+    /**
+     * Solta a folha: ela continua na direção em que ia (inércia) e assenta
+     * devagar, como papel com peso.
+     */
+    private fun animateRelease(complete: Boolean) {
+        // a folha "aberta" fica com o dedo virtual em P0; a folha "virada",
+        // longe de P0, na direção em que estava sendo puxada
+        val flatten = (!turningBack && !complete) || (turningBack && complete)
+        val endX: Float
+        val endY: Float
+        if (flatten) {
+            endX = grabX
+            endY = grabY
         } else {
-            if (complete) 0f else 1f
+            var dirX = fx - grabX
+            var dirY = fy - grabY
+            val len = hypot(dirX, dirY)
+            if (len < 1f) {
+                dirX = -1f; dirY = 0f
+            } else {
+                dirX /= len; dirY /= len
+            }
+            // garante que a folha saia pela esquerda
+            if (dirX > -0.35f) {
+                dirX = -0.5f
+                val n = hypot(dirX, dirY)
+                dirX /= n; dirY /= n
+            }
+            val far = width * 2.3f
+            endX = grabX + dirX * far
+            endY = grabY + dirY * far
         }
+
+        val startX = fx
+        val startY = fy
+        val travel = hypot(endX - startX, endY - startY)
         animator?.cancel()
-        animator = ValueAnimator.ofFloat(t, target).apply {
-            duration = (240 * abs(t - target)).toLong().coerceAtLeast(90)
-            interpolator = DecelerateInterpolator(1.4f)
+        animator = ValueAnimator.ofFloat(0f, 1f).apply {
+            // página pesada: virada longa, começa com o embalo do gesto
+            duration = (480 + 380 * (travel / width)).toLong().coerceIn(450L, 980L)
+            interpolator = DecelerateInterpolator(1.7f)
             addUpdateListener {
-                t = it.animatedValue as Float
-                dragSpeed *= 0.92f
+                val u = it.animatedValue as Float
+                fx = startX + (endX - startX) * u
+                fy = startY + (endY - startY) * u
+                dragSpeed *= 0.94f
                 invalidate()
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
-                    val turned = if (!turningBack) t > 0.5f else t < 0.5f
+                    val turned = complete
                     if (turned) {
                         currentIndex += if (!turningBack) 1 else -1
                         onPageChanged?.invoke(currentIndex)
                     }
                     state = State.IDLE
-                    t = 0f
-                    tiltPhi = 0f
-                    foldPivotY = height / 2f
                     dragSpeed = 0f
                     ensurePages()
                     trimCache()
@@ -394,116 +455,112 @@ class SoftPageView @JvmOverloads constructor(
             return
         }
 
-        // virando: define quem é a folha da frente e a de baixo
         val frontIdx = if (!turningBack) currentIndex else currentIndex - 1
         val underIdx = if (!turningBack) currentIndex + 1 else currentIndex
 
-        cache[underIdx]?.let { under ->
-            computeFit(under)
-            canvas.drawBitmap(under, null, fitRect, pagePaint)
+        val front = cache[frontIdx]
+        val under = cache[underIdx]
+
+        val dist = hypot(fx - grabX, fy - grabY)
+
+        under?.let {
+            computeFit(it)
+            canvas.drawBitmap(it, null, fitRect, pagePaint)
         }
-        // sombra da folha sobre a página de baixo
-        scrimPaint.color = Color.BLACK
-        scrimPaint.alpha = (90 * (1f - t)).toInt().coerceIn(0, 255)
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), scrimPaint)
 
-        cache[frontIdx]?.let { front -> drawSoftPage(canvas, front, t) }
-    }
+        if (front == null) return
+        computeFit(front)
 
-    /**
-     * Desenha a folha sendo puxada e dobrada PARA FRENTE (em direção ao
-     * leitor): a página enrola em volta de um cilindro virtual na linha da
-     * dobra. A linha se inclina conforme a altura do dedo — segurando pelo
-     * alto, a ponta de cima dobra mais; por baixo, a ponta de baixo lidera —
-     * e a inclinação acompanha o dedo em tempo real. A parte levantada
-     * cresce (aproxima-se do olho), passa por cima da própria página e
-     * mostra o verso com o conteúdo esmaecido, como papel visto por trás.
-     */
-    private fun drawSoftPage(canvas: Canvas, bmp: Bitmap, t: Float) {
-        computeFit(bmp)
-        val cy = fitRect.centerY()
-        // raio do rolo: menor no início/fim da virada, cheio no meio;
-        // um puxão rápido aperta o rolo, como papel puxado com força
+        if (dist < 2f) {
+            // folha praticamente plana
+            canvas.drawBitmap(front, null, fitRect, pagePaint)
+            return
+        }
+
+        // ---- geometria da dobra a partir do dedo ----
+        // normal da linha da dobra: aponta do dedo para o ponto seguro
+        var nx = (grabX - fx) / dist
+        var ny = (grabY - fy) / dist
+
+        // raio do rolo: cresce conforme a folha é puxada; puxão rápido aperta
         val speedNorm = (dragSpeed / (width * 0.045f)).coerceIn(0f, 1f)
-        val radius = min(width, height) *
-            (0.09f + 0.06f * sin(PI * t).toFloat()) * (1f - 0.35f * speedNorm)
+        val grip = (dist / (min(width, height) * 0.30f)).coerceIn(0f, 1f)
+        val radius = (min(width, height) * 0.13f * grip * (1f - 0.35f * speedNorm))
+            .coerceAtLeast(1f)
         val piR = (PI * radius).toFloat()
 
-        // inclinação entra suavemente no começo da virada
-        val phi = tiltPhi * min(1f, t * 3f + 0.15f)
-        val cosP = cos(phi)
-        val sinP = sin(phi)
-        val foldY = if (foldPivotY > 0f) foldPivotY else height / 2f
+        // linha da dobra: perpendicular a n, posicionada para que o ponto
+        // seguro (P0) caia exatamente no dedo depois de dobrado
+        val d0 = (dist + piR) / 2f
+        val ax = grabX - nx * d0
+        val ay = grabY - ny * d0
 
-        // a linha da dobra varre da borda direita até tudo sair pela esquerda
-        // (margem extra para a dobra inclinada terminar fora da tela)
-        val aStart = fitRect.right + abs(sinP) * fitRect.height() * 0.5f
-        val aEnd = (-width - piR) / 2f - 48f - height * 0.3f
-        val a = aStart + (aEnd - aStart) * t
+        // sombra geral sobre a página de baixo (esvai conforme a folha sai)
+        var dMax = 0f
+        floatArrayOf(fitRect.left, fitRect.right).forEach { cx ->
+            floatArrayOf(fitRect.top, fitRect.bottom).forEach { cyy ->
+                val d = (cx - ax) * nx + (cyy - ay) * ny
+                if (d > dMax) dMax = d
+            }
+        }
+        val leaveFrac = (1f - dMax / (fitRect.width() + piR)).coerceIn(0f, 1f)
+        scrimPaint.color = Color.BLACK
+        scrimPaint.alpha = (90 * leaveFrac).toInt()
+        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), scrimPaint)
 
+        // ---- malha da folha ----
+        val cy = fitRect.centerY()
         var k = 0
         var ci = 0
         for (j in 0..meshRows) {
             val py = fitRect.top + fitRect.height() * j / meshRows
             for (i in 0..meshCols) {
                 val px = fitRect.left + fitRect.width() * i / meshCols
-                // distância (com sinal) até a linha da dobra inclinada
-                val d = (px - a) * cosP + (py - foldY) * sinP
+                val d = (px - ax) * nx + (py - ay) * ny
                 val disp: Float
-                val lift: Float   // 0 = plano na página, 1 = altura máxima (dobrado)
+                val lift: Float
                 val shade: Float
                 when {
                     d <= 0f -> {
-                        // ainda plano, antes da dobra
-                        disp = 0f
-                        lift = 0f
-                        shade = 1f
+                        disp = 0f; lift = 0f; shade = 1f
                     }
                     d < piR -> {
-                        // enrolando no cilindro: sobe em direção ao leitor
                         val theta = d / radius
                         disp = radius * sin(theta) - d
                         lift = (1f - cos(theta)) / 2f
-                        // mais escuro quando a superfície fica de perfil (topo do rolo)
                         shade = 0.78f + 0.22f * abs(cos(theta))
                     }
                     else -> {
-                        // já dobrado: volta por cima da página, mostrando o verso
                         disp = piR - 2f * d
                         lift = 1f
-                        shade = 0.90f
+                        shade = 1f // o verso será coberto pelo papel creme
                     }
                 }
-                // o deslocamento acontece na direção normal à linha da dobra
-                val x = px + cosP * disp
-                val y = py + sinP * disp
-                // o que levanta fica mais perto do olho: cresce
-                val grow = 1f + 0.14f * lift
+                val x = px + nx * disp
+                val y = py + ny * disp
+                // papel bem mole: o que levanta cresce mais em direção ao olho
+                val grow = 1f + 0.18f * lift
                 verts[k++] = x
                 verts[k++] = cy + (y - cy) * grow
                 val v = (255f * shade).toInt().coerceIn(0, 255)
                 colors[ci++] = Color.rgb(v, v, v)
             }
         }
-        canvas.drawBitmapMesh(bmp, meshCols, meshRows, verts, 0, colors, 0, pagePaint)
+        canvas.drawBitmapMesh(front, meshCols, meshRows, verts, 0, colors, 0, pagePaint)
 
-        // dMax: maior distância da página até a linha da dobra (nos 4 cantos)
-        var dMax = 0f
-        floatArrayOf(fitRect.left, fitRect.right).forEach { cx ->
-            floatArrayOf(fitRect.top, fitRect.bottom).forEach { cyy ->
-                val d = (cx - a) * cosP + (cyy - foldY) * sinP
-                if (d > dMax) dMax = d
-            }
-        }
+        // ---- verso da folha: papel creme fosco, opaco ----
+        drawBackFlap(canvas, nx, ny, ax, ay, radius, piR, cy)
 
-        // sombras desenhadas no referencial da dobra (giradas junto com ela)
+        // ---- sombras no referencial da dobra ----
         canvas.save()
-        canvas.rotate(Math.toDegrees(phi.toDouble()).toFloat(), a, foldY)
-        val yTop = -height.toFloat()
-        val yBot = height * 2f
-        // sombra da aba dobrada sobre a parte plana da própria página
+        canvas.rotate(
+            Math.toDegrees(atan2(ny.toDouble(), nx.toDouble())).toFloat(),
+            ax, ay
+        )
+        val yTop = -height * 1.5f
+        val yBot = height * 2.5f
         if (dMax > piR) {
-            val leadX = a - (dMax - piR)
+            val leadX = ax - (dMax - piR)
             shadowPaint.shader = LinearGradient(
                 leadX, 0f, leadX - 64f, 0f,
                 Color.argb(80, 0, 0, 0), Color.TRANSPARENT,
@@ -511,10 +568,9 @@ class SoftPageView @JvmOverloads constructor(
             )
             canvas.drawRect(leadX - 64f, yTop, leadX, yBot, shadowPaint)
         }
-        // sombra do rolo sobre a página de baixo, adiante da dobra
         if (dMax > 0f) {
             val theta = min(dMax / radius, (PI / 2).toFloat())
-            val rollX = a + radius * sin(theta)
+            val rollX = ax + radius * sin(theta)
             shadowPaint.shader = LinearGradient(
                 rollX, 0f, rollX + 80f, 0f,
                 Color.argb(70, 0, 0, 0), Color.TRANSPARENT,
@@ -523,6 +579,81 @@ class SoftPageView @JvmOverloads constructor(
             canvas.drawRect(rollX, yTop, rollX + 80f, yBot, shadowPaint)
         }
         canvas.restore()
+    }
+
+    /**
+     * Pinta o verso visível da folha (da crista do rolo até a ponta
+     * dobrada) com papel creme fosco e opaco.
+     */
+    private fun drawBackFlap(
+        canvas: Canvas,
+        nx: Float, ny: Float, ax: Float, ay: Float,
+        radius: Float, piR: Float, cy: Float
+    ) {
+        // recorta o retângulo da página pela meia-plano d >= piR/2
+        // (a partir da crista do rolo o que se vê é o verso do papel)
+        val poly = clipRectByHalfPlane(nx, ny, ax, ay, piR / 2f)
+        if (poly.size < 6) return
+        creamPath.reset()
+        var i = 0
+        while (i < poly.size) {
+            val px = poly[i]
+            val py = poly[i + 1]
+            val d = (px - ax) * nx + (py - ay) * ny
+            val disp: Float
+            val lift: Float
+            if (d < piR) {
+                val theta = (d / radius).coerceAtLeast(0f)
+                disp = radius * sin(theta) - d
+                lift = (1f - cos(theta)) / 2f
+            } else {
+                disp = piR - 2f * d
+                lift = 1f
+            }
+            val x = px + nx * disp
+            val yRaw = py + ny * disp
+            val grow = 1f + 0.18f * lift
+            val y = cy + (yRaw - cy) * grow
+            if (i == 0) creamPath.moveTo(x, y) else creamPath.lineTo(x, y)
+            i += 2
+        }
+        creamPath.close()
+        // leve sombreado: mais escuro junto à crista, clareando na ponta
+        val crestX = ax + nx * radius
+        val crestY = ay + ny * radius
+        creamPaint.shader = LinearGradient(
+            crestX, crestY,
+            crestX - nx * 180f, crestY - ny * 180f,
+            CREAM_DARK, CREAM_LIGHT,
+            Shader.TileMode.CLAMP
+        )
+        canvas.drawPath(creamPath, creamPaint)
+    }
+
+    /** Recorta o retângulo da página pelo semiplano d >= minD (Sutherland–Hodgman). */
+    private fun clipRectByHalfPlane(
+        nx: Float, ny: Float, ax: Float, ay: Float, minD: Float
+    ): FloatArray {
+        val xs = floatArrayOf(fitRect.left, fitRect.right, fitRect.right, fitRect.left)
+        val ys = floatArrayOf(fitRect.top, fitRect.top, fitRect.bottom, fitRect.bottom)
+        val out = ArrayList<Float>(12)
+        for (i in 0 until 4) {
+            val x1 = xs[i]; val y1 = ys[i]
+            val x2 = xs[(i + 1) % 4]; val y2 = ys[(i + 1) % 4]
+            val d1 = (x1 - ax) * nx + (y1 - ay) * ny - minD
+            val d2 = (x2 - ax) * nx + (y2 - ay) * ny - minD
+            if (d1 >= 0f) {
+                out.add(x1); out.add(y1)
+                if (d2 < 0f) {
+                    val f = d1 / (d1 - d2)
+                    out.add(x1 + (x2 - x1) * f); out.add(y1 + (y2 - y1) * f)
+                }
+            } else if (d2 >= 0f) {
+                val f = d1 / (d1 - d2)
+                out.add(x1 + (x2 - x1) * f); out.add(y1 + (y2 - y1) * f)
+            }
+        }
+        return out.toFloatArray()
     }
 
     private fun computeFit(bmp: Bitmap) {
