@@ -83,9 +83,14 @@ class SoftPageView @JvmOverloads constructor(
     private var tiltPhi = 0f       // inclinação da linha da dobra (rad)
     private var foldPivotY = 0f    // altura em que o dedo "segura" a folha
 
+    // velocidade do arrasto (suavizada): puxão rápido aperta o rolo
+    private var dragSpeed = 0f
+
     companion object {
-        /** inclinação máxima da dobra (~24°) quando o dedo está num canto */
-        private const val MAX_TILT = 0.42f
+        /** inclinação máxima da dobra (~30°) quando o dedo está num canto */
+        private const val MAX_TILT = 0.52f
+        /** quanto a dobra "gruda" no dedo (0..1, maior = resposta mais direta) */
+        private const val FOLLOW = 0.45f
     }
 
     // zoom
@@ -229,8 +234,9 @@ class SoftPageView @JvmOverloads constructor(
                     // o dedo subindo/descendo reorienta a dobra em tempo real:
                     // a ponta mais próxima do dedo dobra mais
                     val targetTilt = tiltFor(e2.y)
-                    tiltPhi += (targetTilt - tiltPhi) * 0.28f
-                    foldPivotY += (e2.y - foldPivotY) * 0.28f
+                    tiltPhi += (targetTilt - tiltPhi) * FOLLOW
+                    foldPivotY += (e2.y - foldPivotY) * FOLLOW
+                    dragSpeed += (abs(dx) - dragSpeed) * 0.3f
                     invalidate()
                 }
                 return true
@@ -329,6 +335,7 @@ class SoftPageView @JvmOverloads constructor(
             interpolator = DecelerateInterpolator(1.4f)
             addUpdateListener {
                 t = it.animatedValue as Float
+                dragSpeed *= 0.92f
                 invalidate()
             }
             addListener(object : AnimatorListenerAdapter() {
@@ -342,6 +349,7 @@ class SoftPageView @JvmOverloads constructor(
                     t = 0f
                     tiltPhi = 0f
                     foldPivotY = height / 2f
+                    dragSpeed = 0f
                     ensurePages()
                     trimCache()
                     invalidate()
@@ -414,8 +422,11 @@ class SoftPageView @JvmOverloads constructor(
     private fun drawSoftPage(canvas: Canvas, bmp: Bitmap, t: Float) {
         computeFit(bmp)
         val cy = fitRect.centerY()
-        // raio do rolo: menor no início/fim da virada, cheio no meio
-        val radius = min(width, height) * (0.09f + 0.06f * sin(PI * t).toFloat())
+        // raio do rolo: menor no início/fim da virada, cheio no meio;
+        // um puxão rápido aperta o rolo, como papel puxado com força
+        val speedNorm = (dragSpeed / (width * 0.045f)).coerceIn(0f, 1f)
+        val radius = min(width, height) *
+            (0.09f + 0.06f * sin(PI * t).toFloat()) * (1f - 0.35f * speedNorm)
         val piR = (PI * radius).toFloat()
 
         // inclinação entra suavemente no começo da virada
