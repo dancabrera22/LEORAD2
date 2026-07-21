@@ -108,6 +108,7 @@ class ComicReaderActivity : AppCompatActivity() {
 
         findViewById<View>(R.id.btnClose).setOnClickListener { finish() }
         findViewById<View>(R.id.btnSettings).setOnClickListener { showSettingsSheet() }
+        com.just4fun2u.reader.ui.Gestures.blockEdgeGestures(findViewById(android.R.id.content))
         hideSystemBars()
     }
 

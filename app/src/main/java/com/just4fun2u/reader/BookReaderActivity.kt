@@ -16,6 +16,8 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
@@ -29,6 +31,7 @@ import com.just4fun2u.reader.format.EpubBook
 import com.just4fun2u.reader.format.MobiBook
 import com.just4fun2u.reader.format.UnsupportedFormatException
 import com.just4fun2u.reader.ui.Filters
+import com.just4fun2u.reader.ui.Gestures
 import com.just4fun2u.reader.ui.SoftPageView
 import java.util.ArrayDeque
 import kotlinx.coroutines.CoroutineScope
@@ -125,6 +128,15 @@ class BookReaderActivity : AppCompatActivity() {
                 pendingTargetPage = -1
                 openChapter(currentChapter - 1)
             }
+        }
+
+        // bloqueia os gestos de navegação do sistema durante a leitura:
+        // as bordas ficam reservadas para virar as páginas
+        Gestures.blockEdgeGestures(findViewById(android.R.id.content))
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            hide(WindowInsetsCompat.Type.systemBars())
+            systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
 
         val b = intent.getStringExtra("bookId")?.let { LibraryStore.findBook(it) }
