@@ -189,7 +189,8 @@ class ComicReaderActivity : AppCompatActivity() {
     private fun applyMode(jumpToCurrent: Boolean) {
         pager.visibility = if (mode == ComicMode.SLIDE) View.VISIBLE else View.GONE
         softPager.visibility = if (mode == ComicMode.FLIP) View.VISIBLE else View.GONE
-        scrollRecycler.visibility = if (mode == ComicMode.SCROLL) View.VISIBLE else View.GONE
+        findViewById<View>(R.id.scrollZoom).visibility =
+            if (mode == ComicMode.SCROLL) View.VISIBLE else View.GONE
         if (jumpToCurrent) jumpTo(currentPage)
         onPageShown(currentPage)
     }

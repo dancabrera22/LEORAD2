@@ -15,11 +15,17 @@
         android:layout_height="match_parent"
         android:visibility="gone" />
 
-    <androidx.recyclerview.widget.RecyclerView
-        android:id="@+id/scrollRecycler"
+    <com.just4fun2u.reader.ui.PinchZoomFrame
+        android:id="@+id/scrollZoom"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:visibility="gone" />
+        android:visibility="gone">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/scrollRecycler"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+    </com.just4fun2u.reader.ui.PinchZoomFrame>
 
     <ProgressBar
         android:id="@+id/loading"
