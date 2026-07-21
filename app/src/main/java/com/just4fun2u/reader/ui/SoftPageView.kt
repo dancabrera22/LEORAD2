@@ -20,6 +20,7 @@ import android.view.View
 import android.view.animation.DecelerateInterpolator
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.cos
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
@@ -88,9 +89,10 @@ class SoftPageView @JvmOverloads constructor(
     private val shadowPaint = Paint()
     private val bgPaint = Paint().apply { color = Color.BLACK }
 
-    private val meshCols = 24
+    private val meshCols = 32
     private val meshRows = 16
     private val verts = FloatArray((meshCols + 1) * (meshRows + 1) * 2)
+    private val colors = IntArray((meshCols + 1) * (meshRows + 1))
     private val fitRect = RectF()
 
     // ---------- API ----------
@@ -372,45 +374,90 @@ class SoftPageView @JvmOverloads constructor(
     }
 
     /**
-     * Desenha a folha deformada: quanto mais vira, mais a borda direita
-     * "lidera" o movimento e a página se curva verticalmente perto da
-     * borda que está sendo puxada — papel mole, não placa rígida.
+     * Desenha a folha sendo puxada e dobrada PARA FRENTE (em direção ao
+     * leitor): a página enrola em volta de um cilindro virtual na linha da
+     * dobra — a parte levantada cresce (aproxima-se do olho), passa por
+     * cima da própria página e mostra o verso, com o conteúdo esmaecido
+     * como papel visto por trás. A dobra varre a tela acompanhando o dedo.
      */
     private fun drawSoftPage(canvas: Canvas, bmp: Bitmap, t: Float) {
         computeFit(bmp)
-        val lift = sin(PI * t).toFloat()
         val cy = fitRect.centerY()
-        val travel = width * 1.25f
+        // raio do rolo: menor no início/fim da virada, cheio no meio
+        val radius = min(width, height) * (0.09f + 0.06f * sin(PI * t).toFloat())
+        val piR = (PI * radius).toFloat()
+        // a linha da dobra varre da borda direita até tudo sair pela esquerda
+        val aStart = fitRect.right
+        val aEnd = (-width - piR) / 2f - 48f
+        val a = aStart + (aEnd - aStart) * t
+
         var k = 0
+        var ci = 0
         for (j in 0..meshRows) {
             val py = fitRect.top + fitRect.height() * j / meshRows
             for (i in 0..meshCols) {
-                val p = i.toFloat() / meshCols
-                val px = fitRect.left + fitRect.width() * p
-                // a borda direita (p=1) anda mais rápido que a esquerda:
-                // a folha estica e dobra em vez de deslizar rígida
-                val shift = t * travel * (0.55f + 0.45f * p * p)
-                // leve ondulação no meio da folha durante a virada
-                val wave = sin(p * PI).toFloat() * lift * width * 0.015f
-                val x = px - shift - wave
-                // pinça vertical perto da borda puxada: curvatura de papel
-                val y = py + (py - cy) * (-0.16f * lift * p * p)
+                val px = fitRect.left + fitRect.width() * i / meshCols
+                val d = px - a
+                val x: Float
+                val lift: Float   // 0 = plano na página, 1 = altura máxima (2R, dobrado)
+                val shade: Float
+                when {
+                    d <= 0f -> {
+                        // ainda plano, antes da dobra
+                        x = px
+                        lift = 0f
+                        shade = 1f
+                    }
+                    d < piR -> {
+                        // enrolando no cilindro: sobe em direção ao leitor
+                        val theta = d / radius
+                        x = a + radius * sin(theta)
+                        lift = (1f - cos(theta)) / 2f
+                        // mais escuro quando a superfície fica de perfil (topo do rolo)
+                        shade = 0.78f + 0.22f * abs(cos(theta))
+                    }
+                    else -> {
+                        // já dobrado: volta por cima da página, mostrando o verso
+                        x = a - (d - piR)
+                        lift = 1f
+                        shade = 0.90f
+                    }
+                }
+                // o que levanta fica mais perto do olho: cresce verticalmente
+                val grow = 1f + 0.14f * lift
                 verts[k++] = x
-                verts[k++] = y
+                verts[k++] = cy + (py - cy) * grow
+                val v = (255f * shade).toInt().coerceIn(0, 255)
+                colors[ci++] = Color.rgb(v, v, v)
             }
         }
-        canvas.drawBitmapMesh(bmp, meshCols, meshRows, verts, 0, null, 0, pagePaint)
+        canvas.drawBitmapMesh(bmp, meshCols, meshRows, verts, 0, colors, 0, pagePaint)
 
-        // sombra projetada à frente da borda que levanta
-        val edgeX = fitRect.right - t * travel
-        if (lift > 0.02f && edgeX > -80f && edgeX < width + 80f) {
-            val strength = (110 * lift).toInt().coerceIn(0, 255)
-            shadowPaint.shader = LinearGradient(
-                edgeX, 0f, edgeX + 90f, 0f,
-                Color.argb(strength, 0, 0, 0), Color.TRANSPARENT,
-                Shader.TileMode.CLAMP
-            )
-            canvas.drawRect(edgeX, 0f, min(edgeX + 90f, width.toFloat()), height.toFloat(), shadowPaint)
+        val dMax = fitRect.right - a
+        // sombra da aba dobrada sobre a parte plana da própria página
+        if (dMax > piR) {
+            val leadX = a - (dMax - piR)
+            if (leadX > -80f && leadX < width + 80f) {
+                shadowPaint.shader = LinearGradient(
+                    leadX, 0f, leadX - 64f, 0f,
+                    Color.argb(80, 0, 0, 0), Color.TRANSPARENT,
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawRect(max(leadX - 64f, 0f), 0f, leadX, height.toFloat(), shadowPaint)
+            }
+        }
+        // sombra do rolo sobre a página de baixo, à direita da dobra
+        if (dMax > 0f) {
+            val theta = min(dMax / radius, (PI / 2).toFloat())
+            val rollX = a + radius * sin(theta)
+            if (rollX > -80f && rollX < width + 80f) {
+                shadowPaint.shader = LinearGradient(
+                    rollX, 0f, rollX + 80f, 0f,
+                    Color.argb(70, 0, 0, 0), Color.TRANSPARENT,
+                    Shader.TileMode.CLAMP
+                )
+                canvas.drawRect(rollX, 0f, min(rollX + 80f, width.toFloat()), height.toFloat(), shadowPaint)
+            }
         }
     }
 
