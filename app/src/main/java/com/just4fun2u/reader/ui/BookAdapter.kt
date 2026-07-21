@@ -6,11 +6,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
-import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.just4fun2u.reader.R
 import com.just4fun2u.reader.data.Book
 import com.just4fun2u.reader.data.LibraryStore
+import com.just4fun2u.reader.data.LibraryView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class BookAdapter(
+    var viewMode: LibraryView,
     private val onClick: (Book) -> Unit,
     private val onLongClick: (Book) -> Unit
 ) : RecyclerView.Adapter<BookAdapter.Holder>() {
@@ -25,21 +26,22 @@ class BookAdapter(
     private val items = mutableListOf<Book>()
     private val scope = CoroutineScope(Dispatchers.Main)
 
+    @Suppress("NotifyDataSetChanged")
     fun submit(books: List<Book>) {
-        val diff = DiffUtil.calculateDiff(object : DiffUtil.Callback() {
-            override fun getOldListSize() = items.size
-            override fun getNewListSize() = books.size
-            override fun areItemsTheSame(o: Int, n: Int) = items[o].id == books[n].id
-            override fun areContentsTheSame(o: Int, n: Int) = items[o] == books[n]
-        })
         items.clear()
         items.addAll(books)
-        diff.dispatchUpdatesTo(this)
+        notifyDataSetChanged()
     }
 
+    override fun getItemViewType(position: Int) = viewMode.ordinal
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
-        val v = LayoutInflater.from(parent.context).inflate(R.layout.item_book, parent, false)
-        return Holder(v)
+        val layout = when (LibraryView.entries[viewType]) {
+            LibraryView.GRID -> R.layout.item_book
+            LibraryView.LIST -> R.layout.item_book_list
+            LibraryView.CIRCLE -> R.layout.item_book_circle
+        }
+        return Holder(LayoutInflater.from(parent.context).inflate(layout, parent, false))
     }
 
     override fun getItemCount() = items.size
@@ -51,19 +53,21 @@ class BookAdapter(
     inner class Holder(view: View) : RecyclerView.ViewHolder(view) {
         private val cover: ImageView = view.findViewById(R.id.cover)
         private val title: TextView = view.findViewById(R.id.title)
-        private val badge: TextView = view.findViewById(R.id.badge)
-        private val progress: TextView = view.findViewById(R.id.progress)
+        private val badge: TextView? = view.findViewById(R.id.badge)
+        private val progress: TextView? = view.findViewById(R.id.progress)
         private var job: Job? = null
 
         fun bind(book: Book) {
             title.text = book.title
-            badge.text = book.type.name
-            progress.text = if (book.type.isComic && book.pageCount > 0) {
-                itemView.context.getString(
-                    R.string.page_progress, book.lastPage + 1, book.pageCount
-                )
-            } else ""
-            progress.visibility = if (progress.text.isEmpty()) View.GONE else View.VISIBLE
+            badge?.text = book.type.name
+            progress?.let { p ->
+                p.text = if (book.type.isComic && book.pageCount > 0) {
+                    itemView.context.getString(
+                        R.string.page_progress, book.lastPage + 1, book.pageCount
+                    )
+                } else ""
+                p.visibility = if (p.text.isEmpty()) View.GONE else View.VISIBLE
+            }
 
             itemView.setOnClickListener { onClick(book) }
             itemView.setOnLongClickListener { onLongClick(book); true }

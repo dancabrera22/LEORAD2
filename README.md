@@ -14,8 +14,11 @@ Leitor de quadrinhos e livros para Android — simples, leve e offline.
 ## Recursos
 
 - **Biblioteca com capas** — capa extraída automaticamente na importação
+- **3 visualizações da biblioteca** — quadrados, lista ou círculos (botão no topo)
 - **Coleções** — crie coleções, adicione/remova itens (segure um item), filtre por chips
 - **Leitor de quadrinhos** — zoom por pinça, duplo toque, barra de navegação, lembra a última página
+- **Modos de leitura** — virada de página estilo revista (3D), deslizar ou rolagem vertical livre
+- **Filtros de leitura** — papel, vintage, sépia, preto e branco e modo daltônico (realce vermelho-verde), tanto para quadrinhos quanto para livros
 - **Leitor de livros** — navegação por capítulos (EPUB), lembra capítulo e posição de rolagem
 - **Leve** — sem frameworks pesados; APK release minificado com poucos MB
 - Tema claro/escuro automático (Material 3)

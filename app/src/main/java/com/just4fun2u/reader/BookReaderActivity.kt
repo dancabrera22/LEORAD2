@@ -2,6 +2,8 @@ package com.just4fun2u.reader
 
 import android.annotation.SuppressLint
 import android.os.Bundle
+import android.view.Menu
+import android.view.MenuItem
 import android.view.View
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -12,12 +14,18 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import com.google.android.material.chip.Chip
+import com.google.android.material.chip.ChipGroup
 import com.just4fun2u.reader.data.Book
 import com.just4fun2u.reader.data.BookType
 import com.just4fun2u.reader.data.LibraryStore
+import com.just4fun2u.reader.data.Prefs
+import com.just4fun2u.reader.data.ReadFilter
 import com.just4fun2u.reader.format.EpubBook
 import com.just4fun2u.reader.format.MobiBook
 import com.just4fun2u.reader.format.UnsupportedFormatException
+import com.just4fun2u.reader.ui.Filters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -34,6 +42,7 @@ class BookReaderActivity : AppCompatActivity() {
     private lateinit var bottomBar: View
     private var currentChapter = 0
     private var pendingScroll = 0
+    private var filter: ReadFilter = ReadFilter.NONE
     private val scope = CoroutineScope(Dispatchers.Main)
 
     companion object {
@@ -47,6 +56,8 @@ class BookReaderActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         LibraryStore.init(this)
+        Prefs.init(this)
+        filter = Prefs.bookFilter
         setContentView(R.layout.activity_book)
 
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
@@ -190,22 +201,65 @@ class BookReaderActivity : AppCompatActivity() {
             }
             val page = "<html><head><meta charset=\"utf-8\">" +
                 "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
-                "<style>$INJECT_CSS</style></head><body>${mobi.html}</body></html>"
+                "<style id=\"just4fun2u-style\">${combinedCss()}</style></head>" +
+                "<body>${mobi.html}</body></html>"
             webView.loadDataWithBaseURL(null, page, "text/html", "utf-8", null)
         }
     }
 
     // ---------- comum ----------
 
+    override fun onCreateOptionsMenu(menu: Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_book, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: MenuItem): Boolean {
+        if (item.itemId == R.id.action_filter) {
+            showFilterSheet()
+            return true
+        }
+        return super.onOptionsItemSelected(item)
+    }
+
+    private fun showFilterSheet() {
+        val sheet = BottomSheetDialog(this)
+        val view = layoutInflater.inflate(R.layout.sheet_reader_settings, null)
+        sheet.setContentView(view)
+        view.findViewById<View>(R.id.modeSection).visibility = View.GONE
+
+        val filterGroup = view.findViewById<ChipGroup>(R.id.filterGroup)
+        ReadFilter.entries.forEach { f ->
+            val chip = Chip(this).apply {
+                text = Filters.label(this@BookReaderActivity, f)
+                isCheckable = true
+                isChecked = f == filter
+                isCheckedIconVisible = false
+                setOnClickListener {
+                    isChecked = true
+                    filter = f
+                    Prefs.bookFilter = f
+                    injectStyleAndRestore()
+                }
+            }
+            filterGroup.addView(chip)
+        }
+        sheet.show()
+    }
+
+    private fun combinedCss(): String = INJECT_CSS + Filters.css(filter)
+
     private fun injectStyleAndRestore() {
+        val css = combinedCss().replace("\\", "\\\\").replace("'", "\\'")
         val js = """
             (function(){
-              if(!document.getElementById('just4fun2u-style')){
-                var s=document.createElement('style');
+              var s=document.getElementById('just4fun2u-style');
+              if(!s){
+                s=document.createElement('style');
                 s.id='just4fun2u-style';
-                s.textContent='${INJECT_CSS.replace("'", "\\'")}';
                 document.head.appendChild(s);
               }
+              s.textContent='$css';
               var m=document.querySelector('meta[name=viewport]');
               if(!m){
                 m=document.createElement('meta');

@@ -5,10 +5,13 @@ import android.os.Bundle
 import android.view.View
 import android.widget.TextView
 import android.widget.Toast
+import android.widget.PopupMenu
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.chip.Chip
 import com.google.android.material.chip.ChipGroup
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -19,6 +22,8 @@ import com.just4fun2u.reader.data.Book
 import com.just4fun2u.reader.data.BookCollection
 import com.just4fun2u.reader.data.BookImporter
 import com.just4fun2u.reader.data.LibraryStore
+import com.just4fun2u.reader.data.LibraryView
+import com.just4fun2u.reader.data.Prefs
 import com.just4fun2u.reader.ui.BookAdapter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -45,20 +50,28 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         LibraryStore.init(this)
+        Prefs.init(this)
         setContentView(R.layout.activity_main)
 
         chipGroup = findViewById(R.id.chipGroup)
         emptyView = findViewById(R.id.emptyView)
         recycler = findViewById(R.id.recycler)
 
-        val spanCount = (resources.displayMetrics.widthPixels /
-            (140 * resources.displayMetrics.density)).toInt().coerceAtLeast(2)
-        recycler.layoutManager = GridLayoutManager(this, spanCount)
         adapter = BookAdapter(
+            viewMode = Prefs.libraryView,
             onClick = { openBook(it) },
             onLongClick = { showBookMenu(it) }
         )
-        recycler.adapter = adapter
+        applyViewMode(Prefs.libraryView)
+
+        val toolbar = findViewById<MaterialToolbar>(R.id.toolbar)
+        toolbar.inflateMenu(R.menu.menu_main)
+        toolbar.setOnMenuItemClickListener { item ->
+            if (item.itemId == R.id.action_view_mode) {
+                showViewModeMenu(toolbar)
+                true
+            } else false
+        }
 
         findViewById<ExtendedFloatingActionButton>(R.id.fabAdd).setOnClickListener {
             openDocuments.launch(arrayOf("*/*"))
@@ -71,6 +84,36 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refresh()
+    }
+
+    private fun applyViewMode(mode: LibraryView) {
+        Prefs.libraryView = mode
+        adapter.viewMode = mode
+        recycler.layoutManager = when (mode) {
+            LibraryView.GRID -> GridLayoutManager(this, spanFor(140))
+            LibraryView.LIST -> LinearLayoutManager(this)
+            LibraryView.CIRCLE -> GridLayoutManager(this, spanFor(112))
+        }
+        recycler.adapter = adapter
+    }
+
+    private fun spanFor(itemDp: Int): Int =
+        (resources.displayMetrics.widthPixels /
+            (itemDp * resources.displayMetrics.density)).toInt().coerceAtLeast(2)
+
+    private fun showViewModeMenu(anchor: View) {
+        val popup = PopupMenu(this, anchor)
+        popup.menuInflater.inflate(R.menu.menu_view_modes, popup.menu)
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.view_grid -> applyViewMode(LibraryView.GRID)
+                R.id.view_list -> applyViewMode(LibraryView.LIST)
+                R.id.view_circle -> applyViewMode(LibraryView.CIRCLE)
+                else -> return@setOnMenuItemClickListener false
+            }
+            true
+        }
+        popup.show()
     }
 
     private fun refresh() {
