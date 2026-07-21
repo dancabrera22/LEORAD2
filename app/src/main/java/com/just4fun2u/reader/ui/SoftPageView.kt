@@ -101,7 +101,6 @@ class SoftPageView @JvmOverloads constructor(
     private var panY = 0f
 
     private val pagePaint = Paint(Paint.FILTER_BITMAP_FLAG)
-    private val scrimPaint = Paint()
     private val shadowPaint = Paint()
     private val creamPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val bgPaint = Paint().apply { color = Color.BLACK }
@@ -495,7 +494,6 @@ class SoftPageView @JvmOverloads constructor(
         val ax = grabX - nx * d0
         val ay = grabY - ny * d0
 
-        // sombra geral sobre a página de baixo (esvai conforme a folha sai)
         var dMax = 0f
         floatArrayOf(fitRect.left, fitRect.right).forEach { cx ->
             floatArrayOf(fitRect.top, fitRect.bottom).forEach { cyy ->
@@ -503,11 +501,6 @@ class SoftPageView @JvmOverloads constructor(
                 if (d > dMax) dMax = d
             }
         }
-        val leaveFrac = (1f - dMax / (fitRect.width() + piR)).coerceIn(0f, 1f)
-        scrimPaint.color = Color.BLACK
-        scrimPaint.alpha = (90 * leaveFrac).toInt()
-        canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), scrimPaint)
-
         // ---- malha da folha ----
         val cy = fitRect.centerY()
         var k = 0
@@ -590,32 +583,48 @@ class SoftPageView @JvmOverloads constructor(
         nx: Float, ny: Float, ax: Float, ay: Float,
         radius: Float, piR: Float, cy: Float
     ) {
-        // recorta o retângulo da página pela meia-plano d >= piR/2
+        // recorta o retângulo da página pelo semiplano d >= piR/2
         // (a partir da crista do rolo o que se vê é o verso do papel)
         val poly = clipRectByHalfPlane(nx, ny, ax, ay, piR / 2f)
         if (poly.size < 6) return
         creamPath.reset()
-        var i = 0
-        while (i < poly.size) {
-            val px = poly[i]
-            val py = poly[i + 1]
-            val d = (px - ax) * nx + (py - ay) * ny
-            val disp: Float
-            val lift: Float
-            if (d < piR) {
-                val theta = (d / radius).coerceAtLeast(0f)
-                disp = radius * sin(theta) - d
-                lift = (1f - cos(theta)) / 2f
-            } else {
-                disp = piR - 2f * d
-                lift = 1f
+        // o mapeamento da dobra é curvo: amostra cada aresta do polígono em
+        // vários pontos para o contorno seguir a curva real, sem "vazar"
+        // creme sobre áreas da página que não fazem parte do verso
+        val samples = 14
+        val n = poly.size / 2
+        var started = false
+        for (edge in 0 until n) {
+            val x1 = poly[edge * 2]
+            val y1 = poly[edge * 2 + 1]
+            val x2 = poly[((edge + 1) % n) * 2]
+            val y2 = poly[((edge + 1) % n) * 2 + 1]
+            for (s in 0 until samples) {
+                val f = s.toFloat() / samples
+                val px = x1 + (x2 - x1) * f
+                val py = y1 + (y2 - y1) * f
+                val d = (px - ax) * nx + (py - ay) * ny
+                val disp: Float
+                val lift: Float
+                if (d < piR) {
+                    val theta = (d / radius).coerceAtLeast(0f)
+                    disp = radius * sin(theta) - d
+                    lift = (1f - cos(theta)) / 2f
+                } else {
+                    disp = piR - 2f * d
+                    lift = 1f
+                }
+                val x = px + nx * disp
+                val yRaw = py + ny * disp
+                val grow = 1f + 0.18f * lift
+                val y = cy + (yRaw - cy) * grow
+                if (!started) {
+                    creamPath.moveTo(x, y)
+                    started = true
+                } else {
+                    creamPath.lineTo(x, y)
+                }
             }
-            val x = px + nx * disp
-            val yRaw = py + ny * disp
-            val grow = 1f + 0.18f * lift
-            val y = cy + (yRaw - cy) * grow
-            if (i == 0) creamPath.moveTo(x, y) else creamPath.lineTo(x, y)
-            i += 2
         }
         creamPath.close()
         // leve sombreado: mais escuro junto à crista, clareando na ponta
