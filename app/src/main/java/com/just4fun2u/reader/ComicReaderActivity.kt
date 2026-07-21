@@ -52,6 +52,9 @@ class ComicReaderActivity : AppCompatActivity() {
     private var currentPage = 0
     private var suppressSeekCallback = false
 
+    /** Página dupla (revista aberta) em telas grandes na horizontal. */
+    private var spread = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         LibraryStore.init(this)
@@ -71,6 +74,8 @@ class ComicReaderActivity : AppCompatActivity() {
 
         mode = Prefs.comicMode
         filter = Prefs.comicFilter
+        val cfg = resources.configuration
+        spread = cfg.screenWidthDp >= 720 && cfg.screenWidthDp > cfg.screenHeightDp
 
         val bookId = intent.getStringExtra("bookId")
         val b = bookId?.let { LibraryStore.findBook(it) }
@@ -119,28 +124,22 @@ class ComicReaderActivity : AppCompatActivity() {
         pager.offscreenPageLimit = 1
         pager.registerOnPageChangeCallback(object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
-                if (mode == ComicMode.SLIDE) onPageShown(position)
+                if (mode == ComicMode.SLIDE) onPageShown(displayToPage(position))
             }
         })
 
-        softPager.onPageChanged = { if (mode == ComicMode.FLIP) onPageShown(it) }
+        softPager.onPageChanged = { if (mode == ComicMode.FLIP) onPageShown(displayToPage(it)) }
         softPager.onSingleTap = { toggleOverlay() }
         softPager.pageColorFilter = Filters.colorFilter(filter)
         softPager.setSource(object : SoftPageView.PageSource {
-            override val count get() = src.pageCount
+            override val count get() = displayCount(src)
             override fun requestPage(index: Int, cb: (android.graphics.Bitmap?) -> Unit) {
                 scope.launch {
-                    val bmp = withContext(Dispatchers.IO) {
-                        try {
-                            decodeSampled(src.pageBytes(index))
-                        } catch (_: Exception) {
-                            null
-                        }
-                    }
+                    val bmp = withContext(Dispatchers.IO) { displayBitmap(src, index) }
                     cb(bmp)
                 }
             }
-        }, currentPage)
+        }, pageToDisplay(currentPage))
 
         scrollRecycler.layoutManager = LinearLayoutManager(this)
         scrollRecycler.adapter = ScrollAdapter(src)
@@ -181,9 +180,64 @@ class ComicReaderActivity : AppCompatActivity() {
                     .scrollToPositionWithOffset(position, 0)
                 onPageShown(position)
             }
-            ComicMode.FLIP -> softPager.jumpTo(position)
-            ComicMode.SLIDE -> pager.setCurrentItem(position, false)
+            ComicMode.FLIP -> softPager.jumpTo(pageToDisplay(position))
+            ComicMode.SLIDE -> pager.setCurrentItem(pageToDisplay(position), false)
         }
+    }
+
+    // ---------- página dupla (telas grandes) ----------
+
+    /** Quantidade de "telas": capa sozinha, depois pares de páginas. */
+    private fun displayCount(src: ComicSource): Int =
+        if (!spread) src.pageCount else 1 + src.pageCount / 2
+
+    private fun displayToPage(d: Int): Int =
+        if (!spread || d == 0) d.coerceAtLeast(0) else 2 * d - 1
+
+    private fun pageToDisplay(p: Int): Int =
+        if (!spread) p else (p + 1) / 2
+
+    /** Bitmap de uma "tela": página única ou par composto lado a lado. */
+    private fun displayBitmap(src: ComicSource, d: Int): android.graphics.Bitmap? {
+        val maxDim = if (spread) {
+            maxOf(resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels)
+                .coerceAtMost(2560)
+        } else 0
+        val first = displayToPage(d)
+        val a = decodePage(src, first, maxDim) ?: return null
+        if (!spread || d == 0) return a
+        val secondIdx = first + 1
+        if (secondIdx >= src.pageCount) return a
+        val b = decodePage(src, secondIdx, maxDim) ?: return a
+        return composeSpread(a, b)
+    }
+
+    private fun decodePage(src: ComicSource, index: Int, maxDimOverride: Int) = try {
+        decodeSampled(src.pageBytes(index), maxDimOverride)
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun composeSpread(
+        l: android.graphics.Bitmap,
+        r: android.graphics.Bitmap
+    ): android.graphics.Bitmap {
+        val h = minOf(l.height, r.height)
+        val lw = (l.width * h.toFloat() / l.height).toInt().coerceAtLeast(1)
+        val rw = (r.width * h.toFloat() / r.height).toInt().coerceAtLeast(1)
+        val out = android.graphics.Bitmap.createBitmap(
+            lw + rw, h, android.graphics.Bitmap.Config.ARGB_8888
+        )
+        val canvas = android.graphics.Canvas(out)
+        val paint = android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG)
+        canvas.drawBitmap(l, null, android.graphics.RectF(0f, 0f, lw.toFloat(), h.toFloat()), paint)
+        canvas.drawBitmap(
+            r, null,
+            android.graphics.RectF(lw.toFloat(), 0f, (lw + rw).toFloat(), h.toFloat()), paint
+        )
+        l.recycle()
+        r.recycle()
+        return out
     }
 
     private fun applyMode(jumpToCurrent: Boolean) {
@@ -301,7 +355,7 @@ class ComicReaderActivity : AppCompatActivity() {
             return PageHolder(v)
         }
 
-        override fun getItemCount() = src.pageCount
+        override fun getItemCount() = displayCount(src)
 
         override fun onBindViewHolder(holder: PageHolder, position: Int) {
             holder.bind(position)
@@ -326,13 +380,7 @@ class ComicReaderActivity : AppCompatActivity() {
                 image.colorFilter = Filters.colorFilter(filter)
                 spinner.visibility = View.VISIBLE
                 job = scope.launch {
-                    val bmp = withContext(Dispatchers.IO) {
-                        try {
-                            decodeSampled(src.pageBytes(position))
-                        } catch (_: Exception) {
-                            null
-                        }
-                    }
+                    val bmp = withContext(Dispatchers.IO) { displayBitmap(src, position) }
                     spinner.visibility = View.GONE
                     if (bmp != null) image.setImageBitmap(bmp)
                 }
@@ -397,9 +445,10 @@ class ComicReaderActivity : AppCompatActivity() {
         }
     }
 
-    private fun decodeSampled(bytes: ByteArray): android.graphics.Bitmap? {
+    private fun decodeSampled(bytes: ByteArray, maxDimOverride: Int = 0): android.graphics.Bitmap? {
         val metrics = resources.displayMetrics
-        val maxDim = (maxOf(metrics.widthPixels, metrics.heightPixels) * 2).coerceAtMost(4096)
+        val maxDim = if (maxDimOverride > 0) maxDimOverride
+        else (maxOf(metrics.widthPixels, metrics.heightPixels) * 2).coerceAtMost(4096)
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         if (bounds.outWidth <= 0) return null

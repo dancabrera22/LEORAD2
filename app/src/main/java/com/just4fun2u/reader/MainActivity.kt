@@ -90,16 +90,18 @@ class MainActivity : AppCompatActivity() {
         Prefs.libraryView = mode
         adapter.viewMode = mode
         recycler.layoutManager = when (mode) {
-            LibraryView.GRID -> GridLayoutManager(this, spanFor(140))
+            LibraryView.GRID ->
+                GridLayoutManager(this, spanFor(R.dimen.grid_item_width))
             LibraryView.LIST -> LinearLayoutManager(this)
-            LibraryView.CIRCLE -> GridLayoutManager(this, spanFor(112))
+            LibraryView.CIRCLE ->
+                GridLayoutManager(this, spanFor(R.dimen.circle_item_width))
         }
         recycler.adapter = adapter
     }
 
-    private fun spanFor(itemDp: Int): Int =
+    private fun spanFor(itemWidthRes: Int): Int =
         (resources.displayMetrics.widthPixels /
-            (itemDp * resources.displayMetrics.density)).toInt().coerceAtLeast(2)
+            resources.getDimensionPixelSize(itemWidthRes)).coerceAtLeast(2)
 
     private fun showViewModeMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)

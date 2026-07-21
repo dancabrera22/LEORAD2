@@ -76,10 +76,14 @@ class BookReaderActivity : AppCompatActivity() {
                 s.id='j4f-page-style';
                 document.head.appendChild(s);
               }
+              // em telas largas (tablet na horizontal), duas colunas por
+              // página, como um livro aberto
+              var two = window.innerWidth >= 840;
+              var colw = two ? 'calc(50vw - 44px)' : 'calc(100vw - 44px)';
               s.textContent='html{height:100%;overflow:hidden;}'+
                 'body{margin:0 !important;padding:22px 22px !important;'+
                 'box-sizing:border-box !important;height:100% !important;'+
-                'max-width:none !important;column-width:calc(100vw - 44px);'+
+                'max-width:none !important;column-width:'+colw+';'+
                 'column-gap:44px;column-fill:auto;}'+
                 'img{max-width:100% !important;max-height:85vh !important;}';
               return Math.max(1, Math.ceil((document.body.scrollWidth - 20) / window.innerWidth));

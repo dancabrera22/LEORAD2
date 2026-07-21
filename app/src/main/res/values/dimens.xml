@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="grid_item_width">140dp</dimen>
+    <dimen name="grid_cover_height">180dp</dimen>
+    <dimen name="circle_item_width">112dp</dimen>
+</resources>

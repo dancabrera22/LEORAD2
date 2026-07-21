@@ -20,7 +20,6 @@
 
         <activity
             android:name=".ComicReaderActivity"
-            android:configChanges="orientation|screenSize|keyboardHidden|screenLayout"
             android:theme="@style/Theme.Just4Fun2U.Reader" />
 
         <activity android:name=".BookReaderActivity" />
