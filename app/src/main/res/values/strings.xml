@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LeoRad</string>
+    <string name="add_files">Adicionar</string>
+    <string name="importing">Importando…</string>
+    <string name="all_books">Todos</string>
+    <string name="new_collection">+ Coleção</string>
+    <string name="new_collection_title">Nova coleção</string>
+    <string name="manage_collections">Coleções…</string>
+    <string name="rename">Renomear</string>
+    <string name="delete">Excluir</string>
+    <string name="close">Fechar</string>
+    <string name="empty_library">Sua biblioteca está vazia.\nToque em Adicionar para importar CBR, CBZ, EPUB ou MOBI.</string>
+    <string name="empty_collection">Nenhum item nesta coleção.\nSegure um item da biblioteca para adicioná-lo.</string>
+    <string name="delete_book_confirm">Excluir \"%1$s\"?</string>
+    <string name="delete_collection_confirm">Excluir coleção \"%1$s\"?</string>
+    <string name="delete_collection_note">Os itens continuam na biblioteca; só a coleção é removida.</string>
+    <string name="page_progress">%1$d / %2$d</string>
+    <string name="chapter_progress">Capítulo %1$d de %2$d</string>
+    <string name="prev_chapter">Anterior</string>
+    <string name="next_chapter">Próximo</string>
+    <string name="error_opening_comic">Não foi possível abrir este quadrinho.</string>
+    <string name="error_opening_book">Não foi possível abrir este livro.</string>
+    <string name="imported_with_errors">%1$d importado(s), %2$d com erro</string>
+    <plurals name="imported_ok">
+        <item quantity="one">%d arquivo importado</item>
+        <item quantity="other">%d arquivos importados</item>
+    </plurals>
+</resources>
